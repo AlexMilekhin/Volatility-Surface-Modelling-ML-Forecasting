@@ -1,0 +1,100 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyO8KivvPj09pDn7MhmJYLsB"
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "x-_sEhXRxxgM"
+      },
+      "outputs": [],
+      "source": [
+        "import numpy as np\n",
+        "from math import log, sqrt, exp\n",
+        "from scipy.stats import norm\n",
+        "from scipy.optimize import brentq\n",
+        "\n",
+        "# --------------------------------------------\n",
+        "# 1. Black–Scholes core functions\n",
+        "# --------------------------------------------\n",
+        "\n",
+        "def _d1(S, K, r, q, sigma, T):\n",
+        "    return (log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * sqrt(T))\n",
+        "\n",
+        "def _d2(d1, sigma, T):\n",
+        "    return d1 - sigma * sqrt(T)\n",
+        "\n",
+        "def bs_price(is_call, S, K, r, q, sigma, T):\n",
+        "    #Black–Scholes price for a European option.#\n",
+        "    if sigma <= 0 or T <= 0:\n",
+        "        return max(0.0, S * exp(-q * T) - K * exp(-r * T)) if is_call else max(\n",
+        "            0.0, K * exp(-r * T) - S * exp(-q * T)\n",
+        "        )\n",
+        "    d1 = _d1(S, K, r, q, sigma, T)\n",
+        "    d2 = _d2(d1, sigma, T)\n",
+        "    if is_call:\n",
+        "        return S * exp(-q * T) * norm.cdf(d1) - K * exp(-r * T) * norm.cdf(d2)\n",
+        "    else:\n",
+        "        return K * exp(-r * T) * norm.cdf(-d2) - S * exp(-q * T) * norm.cdf(-d1)\n",
+        "\n",
+        "# --------------------------------------------\n",
+        "# 2. Implied volatility via Brent's method\n",
+        "# --------------------------------------------\n",
+        "\n",
+        "def implied_vol(is_call, S, K, r, q, T, price, lo=1e-6, hi=5.0):\n",
+        "    \"\"\"Numerically solve for Black–Scholes implied vol.\"\"\"\n",
+        "    def f(sigma):\n",
+        "        return bs_price(is_call, S, K, r, q, sigma, T) - price\n",
+        "\n",
+        "    try:\n",
+        "        if f(lo) * f(hi) < 0:\n",
+        "            return brentq(f, lo, hi, maxiter=100, xtol=1e-6)\n",
+        "    except Exception:\n",
+        "        pass\n",
+        "    return np.nan\n",
+        "\n",
+        "# --------------------------------------------\n",
+        "# 3. Forward price inference from parity\n",
+        "# --------------------------------------------\n",
+        "\n",
+        "def infer_forward_parity(df_expiry, r, atm_band=0.07):\n",
+        "    #\n",
+        "    Estimate forward price F = K + (C - P) / DF using call/put parity,\n",
+        "    restricted to near-the-money strikes.\n",
+        "   #\n",
+        "    df = df_expiry.copy()\n",
+        "    df = df[df[\"mid\"].notna()]\n",
+        "    df[\"K\"] = df[\"strike\"]\n",
+        "    S_median = df[\"S\"].median()\n",
+        "    near_atm = (df[\"K\"] >= 0.7 * S_median) & (df[\"K\"] <= 1.3 * S_median)\n",
+        "    df = df.loc[near_atm]\n",
+        "    calls = df[df[\"cp_flag\"].str.upper() == \"C\"].set_index(\"K\")\n",
+        "    puts  = df[df[\"cp_flag\"].str.upper() == \"P\"].set_index(\"K\")\n",
+        "    common_K = calls.index.intersection(puts.index)\n",
+        "    if len(common_K) == 0:\n",
+        "        return float(S_median)  # fallback\n",
+        "\n",
+        "    C_mid = calls.loc[common_K, \"mid\"]\n",
+        "    P_mid = puts.loc[common_K, \"mid\"]\n",
+        "    T = df[\"T\"].iloc[0]\n",
+        "    df_disc = exp(-r * T)\n",
+        "    F_est = common_K + (C_mid.values - P_mid.values) / df_disc\n",
+        "    return float(np.nanmedian(F_est[np.isfinite(F_est)])) if len(F_est) else float(S_median)\n"
+      ]
+    }
+  ]
+}
