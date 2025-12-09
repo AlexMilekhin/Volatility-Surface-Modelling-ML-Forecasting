@@ -36,10 +36,11 @@ This project implements **Arbitrage-Free** volatility surface calibration using 
 | File / Notebook | Description |
 |:---|:---|
 | `1_data_collection.ipynb` | Fetches option chains for tickers (e.g., QQQ) and filters for liquidity. |
-| `2_IV_compute.ipynb` | Inverts the Black-Scholes formula using Brent's method to compute raw Implied Volatility. Estimates implied dividends/forwards. |
-| `3_ssvi_fit.ipynb` | Calibrates the SSVI surface to the raw IV data, enforcing no-arbitrage constraints. |
-| `4_RND.ipynb` | Extracts the Risk-Neutral Density (PDF) from the surface and computes moments (Skew, Kurtosis) for feature engineering. |
-| `5_ML_forecasting.ipynb` | Trains a PyTorch MLP to forecast volatility dynamics using the engineering features. |
+| `2_IV_compute.ipynb` | Cleans data, Inverts the Black-Scholes formula using **Brent's method** to compute Implied Volatility, plots IV surface. |
+| `3_IV_analysis_SVI.ipynb` |Analyse IV surface (Skew, Term structure, Curvature), calibrate SVI using **quasi-explicit** method, compute smile features, plot SVI slices  |
+| `4_ssvi_fit.ipynb` | Calibrates the SSVI surface to IV data (**Global fit**), enforcing no-arbitrage constraints (**Gatheral-Jacquier**). |
+| `5_RND.ipynb` | Extracts the Risk-Neutral Density (**Breeden-Litzenberger**) from the surface and computes moments (Skew, Kurtosis) for feature engineering. |
+| `6_ML_forecasting.ipynb` | Trains a PyTorch MLP to forecast volatility dynamics using the engineering features. |
 | `vol_utils.py` | Helper library for Black-Scholes pricing, Greeks, and numerical optimization. |
 
 ## 🧠 Skills Demonstrated
