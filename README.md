@@ -1,50 +1,51 @@
 # Volatility Surface Modelling & ML Forecasting
 
-An end-to-end quantitative pipeline for modeling equity volatility surfaces and forecasting dynamics using deep learning.
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-red)
+![Finance](https://img.shields.io/badge/Quant-Volatility%20Surface-green)
 
-This project implements **Arbitrage-Free** volatility surface calibration using the **Surface SVI (SSVI)** parameterization, extracts high-order market beliefs (Skewness, Kurtosis) via **Risk-Neutral Density (RND)** integration, and utilizes these features to forecast future volatility with a PyTorch Neural Network.
+## 📖 Project Overview
 
-## 🚀 Key Features
+This project implements a comprehensive pipeline for modeling and forecasting the Implied Volatility (IV) surface of equity options. It bridges the gap between traditional parametric quantitative finance models and modern deep learning techniques.
 
-### 1\. Robust Data Pipeline
+The core objective is to forecast future volatility surfaces by enhancing raw market data with structural insights derived from **Stochastic Volatility Inspired (SVI)** models and **Risk-Neutral Densities (RND)**.
 
-  * **Source:** Real-time option chains fetched via **OpenBB** and **Yahoo Finance** (underlying history).
-  * **Cleaning:** Implements rigorous liquidity filtering (bid/ask \> 0, volume \> 0) and spread checks.
-  * **Forward Price:** Infers the market-implied forward price via **Put-Call Parity** regression to ensure consistency across strikes.
+### 🚀 Key Features
+* **Automated Data Pipeline:** Fetches and processes option chain data using Yahoo Finance.
+* **Surface Construction:** Computes Implied Volatility using Black-Scholes inversion.
+* **Parametric Fitting:** Fits **SVI** and **Surface SVI (SSVI)** models to raw data to ensure arbitrage-free smoothing and interpolation.
+* **Feature Engineering:** Extracts high-level economic indicators (Skewness, Kurtosis, Vol-of-Vol) from the Risk-Neutral Density derived from the fitted surfaces.
+* **Deep Learning Forecast:** Implements an **LSTM with Self-Attention** mechanism to capture temporal dependencies and regime changes in the volatility surface.
+* **Physics-Informed Weights:** Uses "Martingale Error" and fit costs to weight training samples, allowing the model to learn less from low-quality or arbitrage-violating market data.
 
-### 2\. Arbitrage-Free Surface Calibration
+## 🗂️ Repository Structure
 
-  * **SVI & SSVI:** Fits raw implied volatilities to the **Stochastic Volatility Inspired (SVI)** model and its arbitrage-free extension, **Surface SVI (SSVI)**.
-  * **Constraints:** Enforces calendar arbitrage constraints (total variance monotonicity) and static arbitrage constraints (Butterfly density).
-  * **Optimization:** Uses non-linear least squares (L-BFGS-B/SLSQP) to minimize IV RMSE.
+The project is organized into modular notebooks representing the research workflow:
 
-### 3\. Risk-Neutral Density (RND) Extraction
+| File | Description |
+| :--- | :--- |
+| **`data_collection.ipynb`** | Scrapes and cleans historical option chain data from Yahoo Finance. |
+| **`IV_compute.ipynb`** | Inverts the Black-Scholes formula to calculate raw Implied Volatility from option prices. |
+| **`IV_analysis_SVI.ipynb`** | Performs initial analysis and fitting of the classic 5-parameter SVI model to individual slices. |
+| **`ssvi_fit.ipynb`** | Fits the **Surface SVI (SSVI)** model to the entire surface simultaneously, enforcing calendar spread arbitrage constraints. |
+| **`RND.ipynb`** | Derives the Risk-Neutral Probability Density Function (PDF) from the fitted volatility surface to extract higher-order moments (Skew, Kurtosis). |
+| **`ML_forecasting.ipynb`** | The main forecasting playground. Prepares features, constructs time-series datasets, and trains baseline models. |
+| **`LSTMSelfAttention.ipynb`** | **(Core Model)** Implements a custom PyTorch LSTM with a Self-Attention head to forecast IV changes, using a robust time-series validation split. |
+| **`vol_utils.py`** | Helper library containing Black-Scholes pricing engines, Greeks calculations, and numerical optimization routines. |
 
-  * **Breeden-Litzenberger:** Numerically differentiates the calibrated option price surface to extract the market-implied probability distribution ($f(K) \approx \frac{\partial^2 C}{\partial K^2}$).
-  * **Feature Engineering:** Calculates higher-order moments of the RND (Risk-Neutral Skewness & Kurtosis) to capture "crash risk" and "tail thickness" as ML features.
+## 🛠️ Methodology
 
-### 4\. Deep Learning Forecasting
+1.  **Data Ingestion:** Raw option prices are filtered for liquidity and validity.
+2.  **Calibration:** * The **SSVI** model is calibrated to market mid-prices to generate a smooth, arbitrage-free volatility surface $\sigma(k, \tau)$.
+    * This step reduces noise and dimensionality compared to using raw option ticks.
+3.  **Feature Extraction:** * Instead of feeding raw prices to the Neural Net, we feed it the *parameters* of the surface ($\rho, \eta, \theta$) and the *shape* of the market's expectation (RND Skew/Kurtosis).
+4.  **Forecasting:**
+    * An **LSTM** network processes the sequence of past surface states.
+    * A **Self-Attention** mechanism highlights which historical time steps are most relevant for the current prediction.
+    * **Weighted Loss:** The training loss is weighted by the inverse of the *Martingale Error*, ensuring the model focuses on economically valid data points.
 
-  * **Architecture:** Feed-Forward Neural Network (MLP) built with **PyTorch**.
-  * **Mechanics:** Uses **Batch Normalization** and **Adam** optimization to predict next-day ATM Volatility (`ATM_IV_{t+1}`).
-  * **Input Features:** Term structure data, SSVI parameters ($\rho, \eta, \gamma$), and RND moments.
-
------
-
-## 📂 Repository Structure
-
-| File / Notebook | Description |
-|:---|:---|
-| `1_data_collection.ipynb` | Fetches option chains for tickers (e.g., QQQ) and filters for liquidity. |
-| `2_IV_compute.ipynb` | Cleans data, Inverts the Black-Scholes formula using **Brent's method** to compute Implied Volatility, plots IV surface. |
-| `3_IV_analysis_SVI.ipynb` |Analyse IV surface (Skew, Term structure, Curvature), calibrate SVI using **quasi-explicit** method, compute smile features, plot SVI slices  |
-| `4_ssvi_fit.ipynb` | Calibrates the SSVI surface to IV data (**Global fit**), enforcing no-arbitrage constraints (**Gatheral-Jacquier**). |
-| `5_RND.ipynb` | Extracts the Risk-Neutral Density (**Breeden-Litzenberger**) from the surface and computes moments (Skew, Kurtosis) for feature engineering. |
-| `6_ML_forecasting.ipynb` | Trains a PyTorch MLP to forecast volatility dynamics using the engineering features. |
-| `vol_utils.py` | Helper library for Black-Scholes pricing, Greeks, and numerical optimization. |
-
-## 🧠 Skills Demonstrated
-
-Python · Quantitative Finance · Options Modelling · Implied Volatility Surfaces  
-SVI / SSVI Calibration · Risk-Neutral Density Extraction · Numerical Optimisation  
-Machine Learning (PyTorch) · Data Engineering · Arbitrage-Free Surface Construction
+## 💻 Tech Stack
+* **Languages:** Python
+* **Machine Learning:** PyTorch, Scikit-Learn
+* **Quant Libraries:** SciPy (Optimization), NumPy, Pandas
+* **Data Source:** `yfinance`
