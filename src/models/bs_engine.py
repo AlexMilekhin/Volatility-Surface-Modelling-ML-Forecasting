@@ -23,7 +23,15 @@ class BlackScholesEngine:
     def _d1(S: np.ndarray, K: np.ndarray, r: float, q: float, 
             sigma: np.ndarray, T: np.ndarray) -> np.ndarray:
         """Calculate d1 parameter for Black-Scholes."""
-        return (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        # Avoid division by zero and invalid log
+        ratio = S / K
+        # Only clip if ratio is non-positive (shouldn't happen with valid inputs, but safety check)
+        ratio = np.where(ratio > 0, ratio, 1e-10)
+        sqrt_T = np.sqrt(T)
+        sigma_sqrt_T = sigma * sqrt_T
+        # Avoid division by zero - use a very small epsilon instead of zero
+        sigma_sqrt_T = np.maximum(sigma_sqrt_T, 1e-10)
+        return (np.log(ratio) + (r - q + 0.5 * sigma**2) * T) / sigma_sqrt_T
     
     @staticmethod
     def _d2(d1: np.ndarray, sigma: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -49,32 +57,56 @@ class BlackScholesEngine:
             Array of option prices
         """
         # Handle edge cases
-        mask_valid = (sigma > 0) & (T > 0)
+        # For very small sigma, return intrinsic value directly to avoid numerical precision issues
+        # This ensures consistency with intrinsic calculation in implied_vol
+        SIGMA_THRESHOLD = 1e-5
+        mask_very_small_sigma = sigma < SIGMA_THRESHOLD
+        mask_valid = (sigma > 0) & (T > 0) & (S > 0) & (K > 0)
         prices = np.zeros_like(S, dtype=float)
+        
+        # Calculate intrinsic value (used for very small sigma and invalid cases)
+        intrinsic_call = np.maximum(0.0, S * np.exp(-q * T) - K * np.exp(-r * T))
+        intrinsic_put = np.maximum(0.0, K * np.exp(-r * T) - S * np.exp(-q * T))
         
         if not mask_valid.any():
             # Return intrinsic value for invalid cases
-            intrinsic_call = np.maximum(0.0, S * exp(-q * T) - K * exp(-r * T))
-            intrinsic_put = np.maximum(0.0, K * exp(-r * T) - S * exp(-q * T))
             return np.where(is_call, intrinsic_call, intrinsic_put)
         
-        # Calculate d1 and d2 for valid cases
-        d1 = BlackScholesEngine._d1(S, K, r, q, sigma, T)
-        d2 = BlackScholesEngine._d2(d1, sigma, T)
+        # For very small sigma, return intrinsic directly to ensure consistency
+        prices[mask_very_small_sigma & mask_valid] = np.where(
+            is_call[mask_very_small_sigma & mask_valid],
+            intrinsic_call[mask_very_small_sigma & mask_valid],
+            intrinsic_put[mask_very_small_sigma & mask_valid]
+        )
         
-        # Call prices
-        call_prices = S * exp(-q * T) * norm.cdf(d1) - K * exp(-r * T) * norm.cdf(d2)
+        # Calculate d1 and d2 only for valid cases with sigma >= threshold to avoid warnings
+        # Skip BS calculation for very small sigma (already handled above)
+        mask_bs_calc = mask_valid & ~mask_very_small_sigma
+        d1 = np.full_like(S, np.nan, dtype=float)
+        d2 = np.full_like(S, np.nan, dtype=float)
         
-        # Put prices
-        put_prices = K * exp(-r * T) * norm.cdf(-d2) - S * exp(-q * T) * norm.cdf(-d1)
+        if mask_bs_calc.any():
+            d1_valid = BlackScholesEngine._d1(S[mask_bs_calc], K[mask_bs_calc], r, q, 
+                                               sigma[mask_bs_calc], T[mask_bs_calc])
+            d2_valid = BlackScholesEngine._d2(d1_valid, sigma[mask_bs_calc], T[mask_bs_calc])
+            d1[mask_bs_calc] = d1_valid
+            d2[mask_bs_calc] = d2_valid
         
-        prices[mask_valid] = np.where(is_call[mask_valid], 
-                                      call_prices[mask_valid], 
-                                      put_prices[mask_valid])
+        # Call prices (only for cases with sigma >= threshold)
+        call_prices = np.full_like(S, np.nan, dtype=float)
+        put_prices = np.full_like(S, np.nan, dtype=float)
+        
+        if mask_bs_calc.any():
+            call_prices[mask_bs_calc] = (S[mask_bs_calc] * np.exp(-q * T[mask_bs_calc]) * norm.cdf(d1[mask_bs_calc]) - 
+                                       K[mask_bs_calc] * np.exp(-r * T[mask_bs_calc]) * norm.cdf(d2[mask_bs_calc]))
+            put_prices[mask_bs_calc] = (K[mask_bs_calc] * np.exp(-r * T[mask_bs_calc]) * norm.cdf(-d2[mask_bs_calc]) - 
+                                      S[mask_bs_calc] * np.exp(-q * T[mask_bs_calc]) * norm.cdf(-d1[mask_bs_calc]))
+        
+        prices[mask_bs_calc] = np.where(is_call[mask_bs_calc], 
+                                      call_prices[mask_bs_calc], 
+                                      put_prices[mask_bs_calc])
         
         # Intrinsic value for invalid cases
-        intrinsic_call = np.maximum(0.0, S * exp(-q * T) - K * exp(-r * T))
-        intrinsic_put = np.maximum(0.0, K * exp(-r * T) - S * exp(-q * T))
         prices[~mask_valid] = np.where(is_call[~mask_valid], 
                                        intrinsic_call[~mask_valid], 
                                        intrinsic_put[~mask_valid])
@@ -117,27 +149,58 @@ class ImpliedVolatilityCalculator:
         Returns:
             Implied volatility (NaN if calculation fails)
         """
+        # Validate inputs
+        if S <= 0 or K <= 0 or T <= 0 or price < 0:
+            logger.warning(f"IV calculation failed: invalid inputs (S={S}, K={K}, T={T}, price={price})")
+            return np.nan
+        
+        # Check if price is below intrinsic value (no solution)
+        intrinsic_call = max(0.0, S * exp(-q * T) - K * exp(-r * T))
+        intrinsic_put = max(0.0, K * exp(-r * T) - S * exp(-q * T))
+        intrinsic = intrinsic_call if is_call else intrinsic_put
+        if price < intrinsic:
+            logger.warning(f"IV calculation failed: price {price} below intrinsic {intrinsic}")
+            return np.nan
+        
         def f(sig: float) -> float:
-            bs_price = self.bs_engine.price(
-                np.array([is_call]), np.array([S]), np.array([K]),
-                r, q, np.array([sig]), np.array([T])
-            )[0]
-            return bs_price - price
+            try:
+                bs_price = self.bs_engine.price(
+                    np.array([is_call]), np.array([S]), np.array([K]),
+                    r, q, np.array([sig]), np.array([T])
+                )[0]
+                if not np.isfinite(bs_price):
+                    return np.nan
+                return bs_price - price
+            except Exception:
+                return np.nan
         
         try:
-            flo, fhi = f(lo), f(hi)
+            flo = f(lo)
+            if not np.isfinite(flo):
+                logger.warning(f"IV calculation failed: f(lo) is not finite")
+                return np.nan
+            
+            fhi = f(hi)
+            if not np.isfinite(fhi):
+                logger.warning(f"IV calculation failed: f(hi) is not finite")
+                return np.nan
+            
             if flo * fhi > 0:
                 # Try expanding the upper bound
-                for hi2 in (10.0, 20.0):
+                for hi2 in (10.0, 20.0, 50.0):
                     fhi2 = f(hi2)
-                    if flo * fhi2 <= 0:
+                    if np.isfinite(fhi2) and flo * fhi2 <= 0:
                         hi = hi2
+                        fhi = fhi2
                         break
                 else:
-                    logger.warning(f"IV calculation failed: no root in [{lo}, {hi}]")
+                    logger.warning(f"IV calculation failed: no root in [{lo}, {hi}] (flo={flo}, fhi={fhi})")
                     return np.nan
             
             return brentq(f, lo, hi, maxiter=200, xtol=1e-8)
+        except (ValueError, RuntimeError) as e:
+            logger.warning(f"IV calculation failed: {e}")
+            return np.nan
         except Exception as e:
             logger.warning(f"IV calculation failed: {e}")
             return np.nan
@@ -167,7 +230,7 @@ class ImpliedVolatilityCalculator:
         Pmid = puts.loc[common, "mid"]
         K = common.to_numpy(dtype=float)
         T = float(df_exp["T"].iloc[0])
-        DF_r = exp(-r * T)
+        DF_r = np.exp(-r * T)
         
         Fvals = K + (Cmid.values - Pmid.values) / DF_r
         Fvals = Fvals[np.isfinite(Fvals)]
