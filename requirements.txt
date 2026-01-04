@@ -1,0 +1,21 @@
+# Core dependencies
+pandas>=1.5.0
+numpy>=1.23.0
+scipy>=1.9.0
+
+# Data fetching
+yfinance>=0.2.0
+openbb>=3.0.0  # Optional, falls back to yfinance if not available
+
+# Deep learning
+torch>=2.0.0
+scikit-learn>=1.2.0
+
+# Data storage
+pyarrow>=10.0.0
+
+# Optional visualization (for notebooks)
+matplotlib>=3.6.0
+
+
+
